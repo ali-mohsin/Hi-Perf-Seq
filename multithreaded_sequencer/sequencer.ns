@@ -1,0 +1,20 @@
+set ns [new Simulator]
+source tb_compat.tcl
+
+set server [$ns node]
+set client1 [$ns node]
+set client2 [$ns node]
+set client3 [$ns node]
+
+
+ set lan0 [$ns make-lan "$server $client1 $client2 $client3" 1000Mb 0ms]
+
+
+tb-set-node-os $server UBUNTU14-64-STD
+tb-set-node-os $client1 UBUNTU14-64-STD
+tb-set-node-os $client2 UBUNTU14-64-STD
+tb-set-node-os $client3 UBUNTU14-64-STD
+
+
+$ns rtproto Static
+$ns run
