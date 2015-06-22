@@ -224,6 +224,7 @@
 		struct pkt pkt;
 	};
 
+	static uint32_t sequence = 0;
 
 	/*
 	 * extract the extremes from a range of ipv4 addresses.
@@ -1241,18 +1242,26 @@
 		cur = ring->cur;
 		// int start = cur;
 		n = nm_ring_space(ring);
+		uint32_t alpha = 4321;
 		if (n < limit)
 			limit = n;
 		for (rx = 0; rx < limit; rx++) {
-			// struct netmap_slot *slot = &ring->slot[cur];
-			// char *p = NETMAP_BUF(ring, slot->buf_idx);
+			struct netmap_slot *slot = &ring->slot[cur];
+			char *p = NETMAP_BUF(ring, slot->buf_idx);
 
 			// 	dump_payload(p, slot->len, ring, cur);
 
 			cur = nm_ring_next(ring, cur);
 			if (dump)
 			{
+				sequence++;
+				bcopy(&sequence,p+42,sizeof(sequence));
 				relay_packets(txring, ring, (cur - 1 ) % init_lim, cur,init_lim);
+			}
+			else
+			{
+				bcopy(p+42,&alpha,sizeof(sequence));
+				// printf("alpha val %d\n", alpha);
 			}
 		}
 		// int end = cur;
