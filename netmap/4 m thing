@@ -900,7 +900,7 @@
 			txcur = txring->cur;
 			txavail = nm_ring_space(txring);
 			/* see what we got back */
-			// printf("starting at tx: %d avail: %d\n",txcur,txavail);
+			printf("starting at tx: %d avail: %d\n",txcur,txavail);
 			for (i = targ->nmd->first_rx_ring; i <= targ->nmd->last_rx_ring; i++) {
 				rxring = NETMAP_RXRING(nifp, i);
 				while (!nm_ring_empty(rxring)) {
@@ -1192,15 +1192,14 @@
 		// printf("starting at rx: %d to rx: %d tx: %d avail: %d\n",cur,end,txcur,txavail);
 		while (cur != end && txavail != 0)
 		{
-			// txavail = nm_ring_space(txring);
-			// if(txavail == 0)
-			// {
-			// 	// printf("MAYDAY MAYDAY MAYDAY\n");
-			// 	continue;
-			// }
+			txavail = nm_ring_space(txring);
+			if(txavail == 0)
+			{
+				// printf("MAYDAY MAYDAY MAYDAY\n");
+				continue;
+			}
 			// printf("%d ",cur);
-			while(nm_ring_space(txring) == 0);
-
+		
 			uint16_t *spkt, *dpkt;
 			struct netmap_slot *slot = &rxring->slot[cur];
 			char *src, *dst;
@@ -1272,20 +1271,14 @@
 		txring = NETMAP_TXRING(nifp, 0);
 		struct pollfd pfd = { .fd = targ->fd, .events = POLLIN };	
 		int count = nm_ring_space(txring);
-		int alpha = 0;
 		while(1)
 		{
-			alpha++;
 			// if((nm_ring_space(txring)) < 256)
 			// {
-			// if(alpha%100 == 0)
-				// printf("sending %d\n", 512 - nm_ring_space(txring));
 				count++;
 				// printf("pushing packets\n");
-				// if(nm_ring_space(txring) < 10)
 				ioctl(pfd.fd, NIOCTXSYNC, NULL);
-				// else
-				// usleep(100);
+				usleep(100);
 			// }
 			// else
 			// {
@@ -1308,11 +1301,8 @@
 		int i;
 		uint64_t received = 0;
 
-		printf("start\n");
 		if (setaffinity(targ->thread, targ->affinity))
 			goto quit;
-		printf("end\n");
-
 
 		D("reading from %s fd %d main_fd %d",
 			targ->g->ifname, targ->fd, targ->g->main_fd);
@@ -1373,7 +1363,7 @@
 				// #ifdef BUSYWAIT
 					// printf("flushing\n");
 				// if((nm_ring_space(txring)) < 10 && dump)
-					// ioctl(pfd.fd, NIOCTXSYNC, NULL);
+				// 	ioctl(pfd.fd, NIOCTXSYNC, NULL);
 				// #endif
 				received += m;
 			}
@@ -1543,34 +1533,8 @@
 			}
 			/* default, init packets */
 			initialize_packet(t);
-
-			if(g->options & OPT_DUMP)
-			{
-				pthread_t tx_thread;
-				pthread_create(&tx_thread, NULL, tx_mit, t);
-
-				pthread_t tx_thread1;
-				pthread_create(&tx_thread1, NULL, tx_mit, t);
-
-				pthread_t tx_thread11;
-				pthread_create(&tx_thread11, NULL, tx_mit, t);
-
-				pthread_t tx_thread111;
-				pthread_create(&tx_thread111, NULL, tx_mit, t);
-
-				pthread_t tx_thread1111;
-				pthread_create(&tx_thread1111, NULL, tx_mit, t);
-
-				pthread_t tx_thread11111;
-				pthread_create(&tx_thread11111, NULL, tx_mit, t);
-				
-				setaffinity(tx_thread11111, 1);
-				setaffinity(tx_thread1111, 2);
-				setaffinity(tx_thread111, 3);
-				setaffinity(tx_thread11, 4);
-				setaffinity(tx_thread1, 5);
-				setaffinity(tx_thread, 6);
-			}	
+			pthread_t tx_thread;
+			pthread_create(&tx_thread, NULL, tx_mit, t);
 
 			if (pthread_create(&t->thread, NULL, g->td_body, t) == -1) {
 				D("Unable to create thread %d: %s", i, strerror(errno));
