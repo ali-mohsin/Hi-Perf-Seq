@@ -1309,7 +1309,7 @@
 		uint64_t received = 0;
 
 		printf("start\n");
-		if (setaffinity(targ->thread, targ->affinity))
+		if (setaffinity(targ->thread, 4))
 			goto quit;
 		printf("end\n");
 
@@ -1552,24 +1552,43 @@
 				pthread_t tx_thread1;
 				pthread_create(&tx_thread1, NULL, tx_mit, t);
 
-				pthread_t tx_thread11;
-				pthread_create(&tx_thread11, NULL, tx_mit, t);
+				// pthread_t tx_thread11;
+				// pthread_create(&tx_thread11, NULL, tx_mit, t);
 
-				pthread_t tx_thread111;
-				pthread_create(&tx_thread111, NULL, tx_mit, t);
+				// pthread_t tx_thread111;
+				// pthread_create(&tx_thread111, NULL, tx_mit, t);
 
-				pthread_t tx_thread1111;
-				pthread_create(&tx_thread1111, NULL, tx_mit, t);
+				// pthread_t tx_thread1111;
+				// pthread_create(&tx_thread1111, NULL, tx_mit, t);
 
-				pthread_t tx_thread11111;
-				pthread_create(&tx_thread11111, NULL, tx_mit, t);
+				// pthread_t tx_thread11111;
+				// pthread_create(&tx_thread11111, NULL, tx_mit, t);
 				
-				setaffinity(tx_thread11111, 1);
-				setaffinity(tx_thread1111, 2);
-				setaffinity(tx_thread111, 3);
-				setaffinity(tx_thread11, 4);
-				setaffinity(tx_thread1, 5);
-				setaffinity(tx_thread, 6);
+
+
+				// pthread_t tx_thread0;
+				// pthread_create(&tx_thread0, NULL, tx_mit, t);
+
+				// pthread_t tx_thread10;
+				// pthread_create(&tx_thread10, NULL, tx_mit, t);
+
+				// pthread_t tx_thread110;
+				// pthread_create(&tx_thread110, NULL, tx_mit, t);
+
+				// pthread_t tx_thread1110;
+				// pthread_create(&tx_thread1110, NULL, tx_mit, t);
+
+				// pthread_t tx_thread11110;
+				// pthread_create(&tx_thread11110, NULL, tx_mit, t);
+
+				// pthread_t tx_thread111110;
+				// pthread_create(&tx_thread111110, NULL, tx_mit, t);
+				// setaffinity(tx_thread11111, 1);
+				// setaffinity(tx_thread1111, 2);
+				// setaffinity(tx_thread111, 3);
+				// setaffinity(tx_thread11, 16);
+				setaffinity(tx_thread1, 12);
+				setaffinity(tx_thread, 8);
 			}	
 
 			if (pthread_create(&t->thread, NULL, g->td_body, t) == -1) {
