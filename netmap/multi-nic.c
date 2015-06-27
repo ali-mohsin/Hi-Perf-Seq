@@ -112,8 +112,6 @@
 		"http://info.iet.unipi.it/~luigi/netmap/ ";
 
 	int verbose = 0;
-	static 		int two_nic = 0;
-
 
 	#define SKIP_PAYLOAD 1 /* do not check payload. XXX unused */
 
@@ -166,7 +164,6 @@
 		struct ip_range dst_ip;
 		struct mac_range dst_mac;
 		struct mac_range src_mac;
-		struct mac_range src_mac_2;
 		int pkt_size;
 		int burst;
 		int forever;
@@ -194,14 +191,11 @@
 
 		int affinity;
 		int main_fd;
-		int main_fd_2;
 		struct nm_desc *nmd;
-		struct nm_desc *nmd_2;
 		int report_interval;		/* milliseconds between prints */
 		void *(*td_body)(void *);
 		void *mmap_addr;
 		char ifname[MAX_IFNAMELEN];
-		char ifname_2[MAX_IFNAMELEN];
 		char *nmr_config;
 		int dummy_send;
 		int virt_header;	/* send also the virt_header */
@@ -220,14 +214,11 @@
 		int completed;
 		int cancel;
 		int fd;
-		int fd_2;
 		struct nm_desc *nmd;
-		struct nm_desc *nmd_2;
 		volatile uint64_t count;
 		struct timespec tic, toc;
 		int me;
 		pthread_t thread;
-		pthread_t thread_2;
 		int affinity;
 
 		struct pkt pkt;
@@ -1261,9 +1252,10 @@
 			// 	dump_payload(p, slot->len, ring, cur);
 
 			cur = nm_ring_next(ring, cur);
+			sequence++;
+
 			if (dump)
 			{
-				sequence++;
 				bcopy(&sequence,p+42,sizeof(sequence));
 				relay_packets(txring, ring, (cur - 1 ) % init_lim, cur,init_lim);
 			}
@@ -1287,7 +1279,10 @@
 		struct netmap_ring *txring;
 
 	    nifp = targ->nmd->nifp;
-		txring = NETMAP_TXRING(nifp, 0);
+	    int ring = 1;
+	    if(targ->g->main_fd == 3)
+	    	ring = 0;
+		txring = NETMAP_TXRING(nifp, ring);
 		struct pollfd pfd = { .fd = targ->fd, .events = POLLIN };	
 		int count = nm_ring_space(txring);
 		int alpha = 0;
@@ -1314,7 +1309,6 @@
 		return NULL;
 	}
 
-
 	static void *
 	receiver_body(void *data)
 	{
@@ -1327,8 +1321,13 @@
 		uint64_t received = 0;
 
 		printf("start\n");
-		if (setaffinity(targ->thread, targ->affinity))
+		if(targ->g->main_fd == 3){
+			if (setaffinity(targ->thread, 4))
+				goto quit;
+		} else{
+			if (setaffinity(targ->thread, 5))
 			goto quit;
+		}
 		printf("end\n");
 
 
@@ -1336,13 +1335,18 @@
 			targ->g->ifname, targ->fd, targ->g->main_fd);
 		/* unbounded wait for the first packet. */
 		for (;!targ->cancel;) {
+			// printf("%s in poll\n",targ->g->ifname );
 			i = poll(&pfd, 1, 1000);
+			// printf("%s polling poll\n",targ->g->ifname );
+
 			if (i > 0 && !(pfd.revents & POLLERR))
 				break;
 			RD(1, "waiting for initial packets, poll returns %d %d",
 				i, pfd.revents);
 		}
 		/* main loop, exit after 1s silence */
+			// printf("%s done poll\n",targ->g->ifname );
+
 		clock_gettime(CLOCK_REALTIME_PRECISE, &targ->tic);
 	    if (targ->g->dev_type == DEV_TAP) {
 		while (!targ->cancel) {
@@ -1360,158 +1364,48 @@
 		}
 	#endif /* !NO_PCAP */
 	    } else {
+			// printf("%s in else\n",targ->g->ifname );
+
 		int dump = targ->g->options & OPT_DUMP;
 
 	        nifp = targ->nmd->nifp;
 		while (!targ->cancel) {
+			// printf("got into the loop %s\n",targ->g->ifname );
 			/* Once we started to receive packets, wait at most 1 seconds
 			   before quitting. */
-				// printf("check 1\n");
-
 			if (poll(&pfd, 1, 1 * 1000) <= 0 && !targ->g->forever) {
 				clock_gettime(CLOCK_REALTIME_PRECISE, &targ->toc);
 				targ->toc.tv_sec -= 1; /* Subtract timeout time. */
 				goto out;
 			}
 
-				// printf("check 2\n");
+			// printf("out of loop poll %s\n",targ->g->ifname );
+
 
 			if (pfd.revents & POLLERR) {
 				D("poll err");
 				goto quit;
 			}
 
-			txring = NETMAP_TXRING(nifp, 0);
-
-				// printf("check 4\n");
+			int ring = 1;
+			if(targ->g->main_fd == 3)
+				ring = 0;
+			txring = NETMAP_TXRING(nifp, ring);
 
 			for (i = targ->nmd->first_rx_ring; i <= targ->nmd->last_rx_ring && i < 55; i++) {
 				int m;
 
-				// printf("check 5\n");
+				// printf("gettinf rx ring %s %i \n",targ->g->ifname, i);
 
 				rxring = NETMAP_RXRING(nifp, i);
-				// printf("check 5.25 i %d\n",i);
 
 				if (nm_ring_empty(rxring))
-				{
-					// printf("check 5.35\n");
-
 					continue;
-				}
-
-				// printf("receiving pack 5.5\n");
-				m = receive_packets(rxring, txring, targ->g->burst, dump);
-				// printf("received pack 5.75\n");
-				// #ifdef BUSYWAIT
-					// printf("flushing\n");
-				// if((nm_ring_space(txring)) < 10 && dump)
-					// ioctl(pfd.fd, NIOCTXSYNC, NULL);
-				// #endif
-				received += m;
-				// printf("check 6\n");
-
-			}
-			targ->count = received;
-		}
-	    }
-
-		clock_gettime(CLOCK_REALTIME_PRECISE, &targ->toc);
-
-	out:
-		targ->completed = 1;
-		targ->count = received;
-
-	quit:
-		/* reset the ``used`` flag. */
-		targ->used = 0;
-
-		return (NULL);
-	}
-
-
-
-	static void *
-	receiver_body_2(void *data)
-	{
-		struct targ *targ = (struct targ *) data;
-		struct pollfd pfd = { .fd = targ->fd_2, .events = POLLIN };
-		printf("pfd: %d\n", targ->fd_2);	
-		struct netmap_if *nifp;
-		struct netmap_ring *rxring, *txring;
-		int i;
-		uint64_t received = 0;
-
-		printf("start\n");
-		// if (setaffinity(targ->thread, targ->affinity))
-		// 	goto quit;
-		printf("end\n");
-
-
-		D("reading from %s fd %d main_fd %d",
-			targ->g->ifname_2, targ->fd_2, targ->g->main_fd_2);
-		/* unbounded wait for the first packet. */
-		for (;!targ->cancel;) {
-			i = poll(&pfd, 1, 1000);
-			if (i > 0 && !(pfd.revents & POLLERR))
-				break;
-			RD(1, "waiting for initial packets, poll returns %d %d",
-				i, pfd.revents);
-		}
-		/* main loop, exit after 1s silence */
-		clock_gettime(CLOCK_REALTIME_PRECISE, &targ->tic);
-	    if (targ->g->dev_type == DEV_TAP) {
-		while (!targ->cancel) {
-			char buf[MAX_BODYSIZE];
-			/* XXX should we poll ? */
-			if (read(targ->g->main_fd_2, buf, sizeof(buf)) > 0)
-				targ->count++;
-		}
-	#ifndef NO_PCAP
-	    } else if (targ->g->dev_type == DEV_PCAP) {
-		while (!targ->cancel) {
-			/* XXX should we poll ? */
-			pcap_dispatch(targ->g->p, targ->g->burst, receive_pcap,
-				(u_char *)&targ->count);
-		}
-	#endif /* !NO_PCAP */
-	    } else {
-		int dump = targ->g->options & OPT_DUMP;
-
-	        nifp = targ->nmd->nifp;
-		while (!targ->cancel) {
-			/* Once we started to receive packets, wait at most 1 seconds
-			   before quitting. */
-			if (poll(&pfd, 1, 1 * 1000) <= 0 && !targ->g->forever) {
-				clock_gettime(CLOCK_REALTIME_PRECISE, &targ->toc);
-				targ->toc.tv_sec -= 1; /* Subtract timeout time. */
-				goto out;
-			}
-
-			if (pfd.revents & POLLERR) {
-				D("poll err");
-				goto quit;
-			}
-
-			txring = NETMAP_TXRING(nifp, 0);
-
-			for (i = targ->nmd_2->first_rx_ring; i <= targ->nmd_2->last_rx_ring ; i++) {
-				int m;
-
-				// printf("check i %d\n", i );
-				rxring = NETMAP_RXRING(nifp, i);
-
-
-				if (nm_ring_empty(rxring))
-				{
-					// printf("check a \n");
-					continue;
-
-				}	
-					// printf("check b \n");
-
+				// printf("into recv packet%s\n",targ->g->ifname );
 
 				m = receive_packets(rxring, txring, targ->g->burst, dump);
+				// printf("out of recv packet%s\n",targ->g->ifname );
+
 				// #ifdef BUSYWAIT
 					// printf("flushing\n");
 				// if((nm_ring_space(txring)) < 10 && dump)
@@ -1636,7 +1530,6 @@
 
 			bzero(t, sizeof(*t));
 			t->fd = -1; /* default, with pcap */
-			t->fd_2 = -1; /* default, with pcap */
 			t->g = g;
 
 		    if (g->dev_type == DEV_NETMAP) {
@@ -1662,36 +1555,21 @@
 			if (g->options & OPT_MONITOR_RX)
 				nmd.req.nr_flags |= NR_MONITOR_RX;
 
-
 			t->nmd = nm_open(t->g->ifname, NULL, nmd_flags |
 				NM_OPEN_IFNAME | NM_OPEN_NO_MMAP, &nmd);
-
-
-
 			if (t->nmd == NULL) {
 				D("Unable to open %s: %s",
 					t->g->ifname, strerror(errno));
 				continue;
 			}
-
-
-			if(two_nic){
-				t->nmd_2 = nm_open(t->g->ifname_2, NULL, nmd_flags |
-					NM_OPEN_IFNAME | NM_OPEN_NO_MMAP, &nmd);
-				if (t->nmd_2 == NULL) {
-					D("Unable to open %s: %s",
-						t->g->ifname_2, strerror(errno));
-					continue;
-				}
-				t->fd_2 = t->nmd_2->fd;				
+			else
+			{
+				printf("thread opened %s\n",t->g->ifname );
 			}
-
-
 			t->fd = t->nmd->fd;
 
 		    } else {
 			targs[i].fd = g->main_fd;
-			targs[i].fd_2 = g->main_fd_2;
 		    }
 			t->used = 1;
 			t->me = i;
@@ -1714,48 +1592,59 @@
 				pthread_t tx_thread1;
 				pthread_create(&tx_thread1, NULL, tx_mit, t);
 
-				setaffinity(tx_thread1, 12);
-				setaffinity(tx_thread, 8);
+				// pthread_t tx_thread11;
+				// pthread_create(&tx_thread11, NULL, tx_mit, t);
 
-				t->affinity = 4;
+				// pthread_t tx_thread111;
+				// pthread_create(&tx_thread111, NULL, tx_mit, t);
 
+				// pthread_t tx_thread1111;
+				// pthread_create(&tx_thread1111, NULL, tx_mit, t);
+
+				// pthread_t tx_thread11111;
+				// pthread_create(&tx_thread11111, NULL, tx_mit, t);
+				
+
+
+				// pthread_t tx_thread0;
+				// pthread_create(&tx_thread0, NULL, tx_mit, t);
+
+				// pthread_t tx_thread10;
+				// pthread_create(&tx_thread10, NULL, tx_mit, t);
+
+				// pthread_t tx_thread110;
+				// pthread_create(&tx_thread110, NULL, tx_mit, t);
+
+				// pthread_t tx_thread1110;
+				// pthread_create(&tx_thread1110, NULL, tx_mit, t);
+
+				// pthread_t tx_thread11110;
+				// pthread_create(&tx_thread11110, NULL, tx_mit, t);
+
+				// pthread_t tx_thread111110;
+				// pthread_create(&tx_thread111110, NULL, tx_mit, t);
+				// setaffinity(tx_thread11111, 1);
+				// setaffinity(tx_thread1111, 2);
+				// setaffinity(tx_thread111, 3);
+				// setaffinity(tx_thread11, 16);
+				if(g->main_fd == 3){
+					setaffinity(tx_thread1, 12);
+					setaffinity(tx_thread, 8);
+				} else
+				{
+					setaffinity(tx_thread1, 13);
+					setaffinity(tx_thread, 9);
+				}
 			}	
 
-
-			// if (pthread_create(&t->thread, NULL, g->td_body, t) == -1) {
-			// 	D("Unable to create thread %d: %s", i, strerror(errno));
-			// 	t->used = 0;
-			// }
-
-
-			if(g->td_body == receiver_body && g->main_fd_2 > -1 && g->options & OPT_DUMP)
-			{
-				// memcpy(t->g->ifname,t->g->ifname_2,sizeof(t->g->ifname));
-				// t->g->nmd = t->g->nmd_2;//,sizeof(t->g->nmd));
-				// t->nmd = t->nmd_2;//,sizeof(t->nmd));
-				// // memcpy(g->main_fd,g->main_fd_2,sizeof(g->main_fd));
-				// // memcpy(t->fd,t->fd_2,sizeof(t->fd));
-				// t->g->main_fd = t->g->main_fd_2;
-				// t->fd = t->fd_2;
-				printf("main fd 2: %d thread fd 2 %d\n", g->main_fd_2, t->fd_2 ); 
-				t->affinity = 5;
-
-				pthread_create(&t->thread_2, NULL, receiver_body_2, t);
-				
-				pthread_t tx_thread0;
-				pthread_create(&tx_thread0, NULL, tx_mit, t);
-
-				pthread_t tx_thread00;
-				pthread_create(&tx_thread00, NULL, tx_mit, t);
-
-				setaffinity(tx_thread00, 13);
-				setaffinity(tx_thread0, 9);
-
+			if (pthread_create(&t->thread, NULL, g->td_body, t) == -1) {
+				D("Unable to create thread %d: %s", i, strerror(errno));
+				t->used = 0;
 			}
 		}
 	}
 
-	static void
+	void
 	main_thread(struct glob_arg *g)
 	{
 		int i;
@@ -1787,10 +1676,10 @@
 				continue;
 			npkts = my_count - prev;
 			pps = (npkts*1000000 + usec/2) / usec;
-			D("%llu pps (%llu pkts in %llu usec)",
+			D("%llu pps (%llu pkts in %llu usec) %s",
 				(unsigned long long)pps,
 				(unsigned long long)npkts,
-				(unsigned long long)usec);
+				(unsigned long long)usec, g->ifname);
 			prev = my_count;
 			toc = now;
 			if (done == g->nthreads)
@@ -1915,21 +1804,32 @@
 	        return fd;
 	}
 
+	static void *
+	main_thread_helper(void *data)
+	{
+		struct glob_arg *arg = (struct glob_arg *) data;
+
+		main_thread(arg);
+		return NULL;
+	}
+
+
 	int
 	main(int arc, char **argv)
 	{
 		int i;
 
 		struct glob_arg g;
+		struct glob_arg g1;
 
 		int ch;
 		int wait_link = 2;
 		int devqueues = 1;	/* how many device queues */
 
 		bzero(&g, sizeof(g));
+		bzero(&g1, sizeof(g1));
 
 		g.main_fd = -1;
-		g.main_fd_2 = -1;
 		g.td_body = receiver_body;
 		g.report_interval = 1000;	/* report interval */
 		g.affinity = -1;
@@ -1948,8 +1848,28 @@
 		g.nmr_config = "";
 		g.virt_header = 0;
 
+
+		g1.main_fd = -1;
+		g1.td_body = receiver_body;
+		g1.report_interval = 1000;	/* report interval */
+		g1.affinity = -1;
+		/* ip addresses can also be a range x.x.x.x-x.x.x.y */
+		g1.src_ip.name = "10.0.0.1";
+		g1.dst_ip.name = "10.1.0.1";
+		g1.dst_mac.name = "ff:ff:ff:ff:ff:ff";
+		g1.src_mac.name = NULL;
+		g1.pkt_size = 60;
+		g1.burst = 512;		// default
+		g1.nthreads = 1;
+		g1.cpus = 1;
+		g1.forever = 1;
+		g1.tx_rate = 0;
+		g1.frags = 1;
+		g1.nmr_config = "";
+		g1.virt_header = 0;
+
 		while ( (ch = getopt(arc, argv,
-				"a:f:F:n:i:z:Il:d:s:D:DD:S:b:c:o:p:T:w:WvR:XC:H:e:m:")) != -1) {
+				"a:f:F:n:i:Il:d:s:D:S:b:c:o:z:p:T:w:WvR:XC:H:e:m:")) != -1) {
 			struct sf *fn;
 
 			switch(ch) {
@@ -1976,8 +1896,11 @@
 					if (!strcmp(fn->key, optarg))
 						break;
 				}
-				if (fn->key)
+				if (fn->key){
+					g1.td_body = fn->f;
+
 					g.td_body = fn->f;
+				}
 				else
 					D("unrecognised function %s", optarg);
 				break;
@@ -2020,36 +1943,35 @@
 				}
 				break;
 
-			case 'z':	/* interface */
-				/* a prefix of tap: netmap: or pcap: forces the mode.
-				 * otherwise we guess
-				 */
-				 two_nic++;
-				D("interface is %s", optarg);
-				if (strlen(optarg) > MAX_IFNAMELEN - 8) {
-					D("ifname too long %s", optarg);
+				case 'z':	/* interface */
+					/* a prefix of tap: netmap: or pcap: forces the mode.
+					 * otherwise we guess
+					 */
+					D("interface is %s", optarg);
+					if (strlen(optarg) > MAX_IFNAMELEN - 8) {
+						D("ifname too long %s", optarg);
+						break;
+					}
+					strcpy(g1.ifname, optarg);
+					if (!strcmp(optarg, "null")) {
+						g1.dev_type = DEV_NETMAP;
+						g1.dummy_send = 1;
+					} else if (!strncmp(optarg, "tap:", 4)) {
+						g1.dev_type = DEV_TAP;
+						strcpy(g1.ifname, optarg + 4);
+					} else if (!strncmp(optarg, "pcap:", 5)) {
+						g1.dev_type = DEV_PCAP;
+						strcpy(g1.ifname, optarg + 5);
+					} else if (!strncmp(optarg, "netmap:", 7) ||
+						   !strncmp(optarg, "vale", 4)) {
+						g1.dev_type = DEV_NETMAP;
+					} else if (!strncmp(optarg, "tap", 3)) {
+						g1.dev_type = DEV_TAP;
+					} else { /* prepend netmap: */
+						g1.dev_type = DEV_NETMAP;
+						sprintf(g1.ifname, "netmap:%s", optarg);
+					}
 					break;
-				}
-				strcpy(g.ifname_2, optarg);
-				if (!strcmp(optarg, "null")) {
-					g.dev_type = DEV_NETMAP;
-					g.dummy_send = 1;
-				} else if (!strncmp(optarg, "tap:", 4)) {
-					g.dev_type = DEV_TAP;
-					strcpy(g.ifname, optarg + 4);
-				} else if (!strncmp(optarg, "pcap:", 5)) {
-					g.dev_type = DEV_PCAP;
-					strcpy(g.ifname, optarg + 5);
-				} else if (!strncmp(optarg, "netmap:", 7) ||
-					   !strncmp(optarg, "vale", 4)) {
-					g.dev_type = DEV_NETMAP;
-				} else if (!strncmp(optarg, "tap", 3)) {
-					g.dev_type = DEV_TAP;
-				} else { /* prepend netmap: */
-					g.dev_type = DEV_NETMAP;
-					sprintf(g.ifname_2, "netmap:%s", optarg);
-				}
-				break;
 
 
 			case 'I':
@@ -2094,7 +2016,6 @@
 				g.dst_mac.name = optarg;
 				break;
 
-
 			case 'S': /* source mac */
 				g.src_mac.name = optarg;
 				break;
@@ -2106,6 +2027,7 @@
 				break;
 			case 'X':
 				g.options |= OPT_DUMP;
+				g1.options |= OPT_DUMP;
 				break;
 			case 'C':
 				g.nmr_config = strdup(optarg);
@@ -2141,6 +2063,10 @@
 		if (g.cpus == 0)
 			g.cpus = i;
 
+		if (g1.cpus == 0)
+			g1.cpus = i;
+
+
 		if (g.pkt_size < 16 || g.pkt_size > MAX_PKTSIZE) {
 			D("bad pktsize %d [16..%d]\n", g.pkt_size, MAX_PKTSIZE);
 			usage();
@@ -2154,23 +2080,44 @@
 				// continue, fail later
 			}
 			g.src_mac.name = mybuf;
-			if (source_hwaddr(g.ifname_2, mybuf) == -1) {
+		}
+
+
+		if (g1.src_mac.name == NULL) {
+			static char mybuf[20] = "00:00:00:00:00:00";
+			/* retrieve source mac address. */
+			if (source_hwaddr(g1.ifname, mybuf) == -1) {
 				D("Unable to retrieve source mac");
 				// continue, fail later
 			}
-			g.src_mac_2.name = mybuf;
+			g1.src_mac.name = mybuf;
 		}
+
 		/* extract address ranges */
 		extract_ip_range(&g.src_ip);
 		extract_ip_range(&g.dst_ip);
 		extract_mac_range(&g.src_mac);
 		extract_mac_range(&g.dst_mac);
 
+		extract_ip_range(&g1.src_ip);
+		extract_ip_range(&g1.dst_ip);
+		extract_mac_range(&g1.src_mac);
+		extract_mac_range(&g1.dst_mac);
+
+
 		if (g.src_ip.start != g.src_ip.end ||
 		    g.src_ip.port0 != g.src_ip.port1 ||
 		    g.dst_ip.start != g.dst_ip.end ||
 		    g.dst_ip.port0 != g.dst_ip.port1)
 			g.options |= OPT_COPY;
+
+
+		if (g1.src_ip.start != g1.src_ip.end ||
+		    g1.src_ip.port0 != g1.src_ip.port1 ||
+		    g1.dst_ip.start != g1.dst_ip.end ||
+		    g1.dst_ip.port0 != g1.dst_ip.port1)
+			g1.options |= OPT_COPY;
+
 
 		if (g.virt_header != 0 && g.virt_header != VIRT_HDR_1
 				&& g.virt_header != VIRT_HDR_2) {
@@ -2210,14 +2157,13 @@
 			base_nmd.nr_arg3 = g.extra_bufs;
 		}
 
+		struct nmreq base_nmd1;
 
-		struct nmreq base_nmd_2;
+		bzero(&base_nmd1, sizeof(base_nmd1));
 
-		bzero(&base_nmd_2, sizeof(base_nmd_2));
-
-		parse_nmr_config(g.nmr_config, &base_nmd_2);
-		if (g.extra_bufs) {
-			base_nmd_2.nr_arg3 = g.extra_bufs;
+		parse_nmr_config(g1.nmr_config, &base_nmd1);
+		if (g1.extra_bufs) {
+			base_nmd1.nr_arg3 = g1.extra_bufs;
 		}
 
 
@@ -2228,40 +2174,33 @@
 		 * which in turn may take some time for the PHY to
 		 * reconfigure. We do the open here to have time to reset.
 		 */
-
 		g.nmd = nm_open(g.ifname, &base_nmd, 0, NULL);
-
-		printf("trying to open 2nd interface\n");
-		if(two_nic){
-
-			strcpy(g.src_mac.name, g.src_mac_2.name);
-			g.nmd_2 = nm_open(g.ifname_2, &base_nmd_2, 0, NULL);
-			printf("opened 2nd interface\n");
-			if (g.nmd_2 == NULL) {
-				D("Unable to open %s: %s", g.ifname_2, strerror(errno));
-				goto out;
-			}
-		}
-
-
-
 		if (g.nmd == NULL) {
 			D("Unable to open %s: %s", g.ifname, strerror(errno));
 			goto out;
 		}
 		g.main_fd = g.nmd->fd;
-	
-		if(two_nic)
-			g.main_fd_2 = g.nmd_2->fd;
-	
-
 		D("mapped %dKB at %p", g.nmd->req.nr_memsize>>10, g.nmd->mem);
+
+
+		g1.nmd = nm_open(g1.ifname, &base_nmd1, 0, NULL);
+		if (g1.nmd == NULL) {
+			D("Unable to open %s: %s", g1.ifname, strerror(errno));
+			goto out;
+		}
+		g1.main_fd = g1.nmd->fd;
+		D("mapped %dKB at %p", g1.nmd->req.nr_memsize>>10, g1.nmd->mem);
 
 		/* get num of queues in tx or rx */ 
 		if (g.td_body == sender_body)
 			devqueues = g.nmd->req.nr_tx_rings;
 		else 
 			devqueues = g.nmd->req.nr_rx_rings;
+
+		if (g1.td_body == sender_body)
+			devqueues += g1.nmd->req.nr_tx_rings;
+		else 
+			devqueues += g1.nmd->req.nr_rx_rings;
 
 		/* validate provided nthreads. */
 		if (g.nthreads < 1 || g.nthreads > devqueues) {
@@ -2302,6 +2241,12 @@
 				g.src_mac.name, g.dst_mac.name);
 		}
 
+	if (g1.td_body == sender_body) {
+			fprintf(stdout, "%s -> %s (%s -> %s)\n",
+				g1.src_ip.name, g1.dst_ip.name,
+				g1.src_mac.name, g1.dst_mac.name);
+		}
+
 	out:
 		/* Exit if something went wrong. */
 		if (g.main_fd < 0) {
@@ -2310,6 +2255,33 @@
 		}
 	    }
 
+
+		if (g1.options) {
+			D("--- SPECIAL OPTIONS:%s%s%s%s%s\n",
+				g1.options & OPT_PREFETCH ? " prefetch" : "",
+				g1.options & OPT_ACCESS ? " access" : "",
+				g1.options & OPT_MEMCPY ? " memcpy" : "",
+				g1.options & OPT_INDIRECT ? " indirect" : "",
+				g1.options & OPT_COPY ? " copy" : "");
+		}
+
+		g1.tx_period.tv_sec = g1.tx_period.tv_nsec = 0;
+		if (g1.tx_rate > 0) {
+			/* try to have at least something every second,
+			 * reducing the burst size to some 0.01s worth of data
+			 * (but no less than one full set of fragments)
+		 	 */
+			uint64_t x;
+			int lim = (g1.tx_rate)/300;
+			if (g1.burst > lim)
+				g1.burst = lim;
+			if (g1.burst < g1.frags)
+				g1.burst = g1.frags;
+			x = ((uint64_t)1000000000 * (uint64_t)g1.burst) / (uint64_t) g1.tx_rate;
+			g1.tx_period.tv_nsec = x;
+			g1.tx_period.tv_sec = g1.tx_period.tv_nsec / 1000000000;
+			g1.tx_period.tv_nsec = g1.tx_period.tv_nsec % 1000000000;
+		}
 
 		if (g.options) {
 			D("--- SPECIAL OPTIONS:%s%s%s%s%s\n",
@@ -2337,22 +2309,44 @@
 			g.tx_period.tv_sec = g.tx_period.tv_nsec / 1000000000;
 			g.tx_period.tv_nsec = g.tx_period.tv_nsec % 1000000000;
 		}
-		if (g.td_body == sender_body)
+
+
+
+		if (g1.td_body == sender_body)
 		    D("Sending %d packets every  %ld.%09ld s",
-				g.burst, g.tx_period.tv_sec, g.tx_period.tv_nsec);
+				g1.burst, g1.tx_period.tv_sec, g1.tx_period.tv_nsec);
 		/* Wait for PHY reset. */
 		D("Wait %d secs for phy reset", wait_link);
 		sleep(wait_link);
 		D("Ready...");
 
 		/* Install ^C handler. */
-		global_nthreads = g.nthreads;
+		global_nthreads = g.nthreads + g1.nthreads;
 		signal(SIGINT, sigint_h);
 
-		printf("going on to start threads\n");
+
 		start_threads(&g);
-		main_thread(&g);
+		if(g1.main_fd > 0)
+	 		start_threads(&g1);
+
+	 	// main_thread(&g);
+
+		pthread_t m1,m2;
+		pthread_create(&m1, NULL, main_thread_helper, (void*)(&g));
+		// pthread_create(&m1, NULL, main_thread, g);
+
+
+		if(g1.main_fd > 0)
+		{
+			pthread_create(&m2, NULL, main_thread_helper, (void*)(&g1));
+		}
+		pthread_join(m1,NULL);
+		pthread_join(m2,NULL);
+
+		// 	main_thread(&g1);
+		// main_thread(&g);
 		return 0;
 	}
 
 	/* end of file */
+
