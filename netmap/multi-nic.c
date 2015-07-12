@@ -1049,7 +1049,7 @@
 		size = targ->g->pkt_size + targ->g->virt_header;
 
 		D("start, fd %d main_fd %d", targ->fd, targ->g->main_fd);
-		if (setaffinity(targ->thread, targ->affinity))
+		if (setaffinity(targ->thread, 2))
 			goto quit;
 
 		/* main loop.*/
@@ -1231,7 +1231,7 @@
 		// printf("\n");
 		return 1;
 	}
-
+ 
 
 	static int
 	receive_packets(struct netmap_ring *ring, struct netmap_ring *txring, int limit, int dump)
@@ -1252,7 +1252,7 @@
 			// 	dump_payload(p, slot->len, ring, cur);
 
 			cur = nm_ring_next(ring, cur);
-			sequence++;
+			// sequence++;
 
 			if (dump)
 			{
@@ -1282,6 +1282,8 @@
 	    int ring = 1;
 	    if(targ->g->main_fd == 3)
 	    	ring = 0;
+
+	    printf("ring %d\n", ring);
 		txring = NETMAP_TXRING(nifp, ring);
 		struct pollfd pfd = { .fd = targ->fd, .events = POLLIN };	
 		int count = nm_ring_space(txring);
@@ -1390,6 +1392,9 @@
 			int ring = 1;
 			if(targ->g->main_fd == 3)
 				ring = 0;
+	   
+	   		// printf(" rx ring %d\n", ring);
+
 			txring = NETMAP_TXRING(nifp, ring);
 
 			for (i = targ->nmd->first_rx_ring; i <= targ->nmd->last_rx_ring && i < 55; i++) {
@@ -1399,10 +1404,13 @@
 
 				rxring = NETMAP_RXRING(nifp, i);
 
-				if (nm_ring_empty(rxring))
+				if (nm_ring_empty(rxring)){
+					// printf("nothing in ring %d\n",i);
 					continue;
+				}
 				// printf("into recv packet%s\n",targ->g->ifname );
 
+				// printf("rx packet from ring %d nifp %p\n", i,nifp);
 				m = receive_packets(rxring, txring, targ->g->burst, dump);
 				// printf("out of recv packet%s\n",targ->g->ifname );
 
@@ -1520,7 +1528,11 @@
 	{
 		int i;
 
+		//TODO- mohsin this targs is global and main thread reads from this targs and its assumed that this function is only called 
+		// once make sure you change this targs allocation and corresponding usages accordingly, also both threads might be using 
+		// the same targ
 		targs = calloc(g->nthreads, sizeof(*targs));
+
 		/*
 		 * Now create the desired number of threads, each one
 		 * using a single descriptor.
@@ -1630,7 +1642,8 @@
 				if(g->main_fd == 3){
 					setaffinity(tx_thread1, 12);
 					setaffinity(tx_thread, 8);
-				} else
+				} 
+				else
 				{
 					setaffinity(tx_thread1, 13);
 					setaffinity(tx_thread, 9);
@@ -1839,7 +1852,7 @@
 		g.dst_mac.name = "ff:ff:ff:ff:ff:ff";
 		g.src_mac.name = NULL;
 		g.pkt_size = 60;
-		g.burst = 512;		// default
+		g.burst = 1024;		// default
 		g.nthreads = 1;
 		g.cpus = 1;
 		g.forever = 1;
@@ -1859,7 +1872,7 @@
 		g1.dst_mac.name = "ff:ff:ff:ff:ff:ff";
 		g1.src_mac.name = NULL;
 		g1.pkt_size = 60;
-		g1.burst = 512;		// default
+		g1.burst = 1024;		// default
 		g1.nthreads = 1;
 		g1.cpus = 1;
 		g1.forever = 1;
