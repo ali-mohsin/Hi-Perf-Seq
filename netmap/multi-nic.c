@@ -44,6 +44,7 @@
 
 
 	#include <ctype.h>	// isprint()
+	#include <stdatomic.h>
 	#include <unistd.h>	// sysconf()
 	#include <sys/poll.h>
 	#include <arpa/inet.h>	/* ntohs */
@@ -53,7 +54,6 @@
 	#include <netinet/in.h>
 	#include <netinet/ip.h>
 	#include <netinet/udp.h>
-
 	#include <pthread.h>
 
 	#ifndef NO_PCAP
@@ -225,6 +225,8 @@
 	};
 
 	static uint32_t sequence = 0;
+	// static uint32_t out = 0;
+	 atomic_int sequence1 = 0;
 
 	/*
 	 * extract the extremes from a range of ipv4 addresses.
@@ -704,6 +706,8 @@
 			char *p = NETMAP_BUF(ring, slot->buf_idx);
 
 			slot->flags = 0;
+			// out++;
+			// bcopy(p+46,&out,sizeof(out));
 			// if (options & OPT_INDIRECT) {
 			// 	printf("pkt indirect\n");
 
@@ -1191,6 +1195,8 @@
 		int txcur = txring->cur;
 		int txavail = nm_ring_space(txring);
 		// printf("starting at rx: %d to rx: %d tx: %d avail: %d\n",cur,end,txcur,txavail);
+		// printf("start %d end %d avail %d txcur %d\n", cur, end, txavail, txcur);
+
 		while (cur != end && txavail != 0)
 		{
 			// txavail = nm_ring_space(txring);
@@ -1221,6 +1227,7 @@
 			txavail--;
 			rxring->head = cur; // I have taken out the packet I needed
 			cur = (cur+1) % burst ; // TODO remove hard coding
+			// printf("cur %d\n", cur);
 		}
 
 		txring->head = txring->cur = txcur;
@@ -1233,6 +1240,84 @@
 	}
  
 
+//  static int
+// receive_packets(struct netmap_ring *ring, struct netmap_ring *txring, int limit, int dump)
+// {
+// 	struct timespec ts, now, last_print;
+// 	struct tstamp *tp;
+
+// 	int cur, rx, n, init_lim;
+// 	init_lim = limit;
+// 	// printf("limit %d\n", limit);
+// 	cur = ring->cur;
+// 	// int start = cur;
+// 	n = nm_ring_space(ring);
+// 	uint32_t alpha = 4321;
+// 	if (n < limit)
+// 		limit = n;			
+// 	clock_gettime(CLOCK_REALTIME_PRECISE, &last_print);
+// 	now = last_print;
+// 	// int alpha = 0;
+// 	// int start = 0;
+	
+// 	for (rx = 0; rx < limit; rx++) {
+
+// 		struct netmap_slot *slot = &ring->slot[cur];
+// 		char *p = NETMAP_BUF(ring, slot->buf_idx);
+
+// 		// 	dump_payload(p, slot->len, ring, cur);
+// 		// if(rx==0)
+// 		// 	start = cur - 1;
+
+// 		cur = nm_ring_next(ring, cur);
+// 		if (dump)
+// 		{
+// 			sequence++;
+// 			bcopy(&sequence,p+42,sizeof(sequence));
+// 			// if(start != -1){
+// 			relay_packets(txring, ring, cur , (cur + 1 ) % init_lim,init_lim);
+// 				// start = cur;
+// 			// }
+// 			// int start = (cur - 1 ) % init_lim;
+
+// 			// if (start == -1)
+// 			// 	start = 511;
+// 		}
+// 		else if (rx==0)
+// 		{
+// 			bcopy(p+42,&alpha,sizeof(sequence));
+// 			tp = (struct tstamp *)(p+46);
+// 			ts.tv_sec = (time_t)tp->sec;
+// 			ts.tv_nsec = (long)tp->nsec;
+// 			ts.tv_sec = now.tv_sec - ts.tv_sec;
+// 			ts.tv_nsec = now.tv_nsec - ts.tv_nsec;
+// 			if (ts.tv_nsec < 0) {
+// 				ts.tv_nsec += 1000000000;
+// 				ts.tv_sec--;
+// 			}
+
+
+// 			// if (rand()%100000 < 2) D("seq %d/ delta %d.%09d", sequence,
+// 			// 			(int)ts.tv_sec, (int)ts.tv_nsec);
+// 			// printf("alpha val %d\n", alpha);
+// 		}
+// 		else {
+// 				bcopy(p+42,&alpha,sizeof(alpha));
+// 	// 			bcopy(p+46,&client,sizeof(client));
+// 				printf("%d\n", alpha);
+// 		}
+// 	}
+
+// 	// if(dump)
+// 	// {
+
+// 	// }
+// 	// int end = cur;
+// 	ring->head = ring->cur = cur;
+
+// 	return (rx);
+// }
+
 	static int
 	receive_packets(struct netmap_ring *ring, struct netmap_ring *txring, int limit, int dump)
 	{
@@ -1241,8 +1326,9 @@
 		// printf("limit %d\n", limit);
 		cur = ring->cur;
 		// int start = cur;
+		// int start = cur;
 		n = nm_ring_space(ring);
-		uint32_t alpha = 4321;
+		uint32_t server = 4321;
 		if (n < limit)
 			limit = n;
 		for (rx = 0; rx < limit; rx++) {
@@ -1252,17 +1338,22 @@
 			// 	dump_payload(p, slot->len, ring, cur);
 
 			cur = nm_ring_next(ring, cur);
-			// sequence++;
-
+			// if(rx == 0)
+			// 	start = cur;
+			// atomic_int* al;
+			// atomic_fetch_add(&sequence1,1);
 			if (dump)
 			{
+				sequence++;
 				bcopy(&sequence,p+42,sizeof(sequence));
-				relay_packets(txring, ring, (cur - 1 ) % init_lim, cur,init_lim);
+				relay_packets(txring, ring, (cur - 1 ) % init_lim,cur , init_lim);
+				// printf("start %d end %d\n",start, cur);
 			}
 			else
 			{
-				bcopy(p+42,&alpha,sizeof(sequence));
-				// printf("alpha val %d\n", alpha);
+				bcopy(p+42,&server,sizeof(server));
+				// bcopy(p+46,&client,sizeof(client));
+				// printf("%d \n",  server);
 			}
 		}
 		// int end = cur;
